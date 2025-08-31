@@ -1,0 +1,29 @@
+{
+  "productName": "LumenPDF Studio",
+  "version": "0.1.0",
+  "identifier": "com.lumen.pdfstudio",
+  "build": {
+    "beforeDevCommand": "pnpm vite",
+    "beforeBuildCommand": "pnpm vite build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LumenPDF Studio",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "dragDropEnabled": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/qpdf"],
+    "resources": ["binaries/*"]
+  }
+}
