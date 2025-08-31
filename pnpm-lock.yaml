@@ -14,6 +14,9 @@ importers:
       '@tauri-apps/plugin-dialog':
         specifier: ^2.3.3
         version: 2.3.3
+      '@tauri-apps/plugin-fs':
+        specifier: ^2.4.2
+        version: 2.4.2
       react:
         specifier: ^19.1.0
         version: 19.1.1
@@ -477,6 +480,9 @@ packages:
 
   '@tauri-apps/plugin-dialog@2.3.3':
     resolution: {integrity: sha512-cWXB9QJDbLIA0v7I5QY183awazBEQNPhp19iPvrMZoJRX8SbFkhWFx1/q7zy7xGpXXzxz29qtq6z21Ho7W5Iew==}
+
+  '@tauri-apps/plugin-fs@2.4.2':
+    resolution: {integrity: sha512-YGhmYuTgXGsi6AjoV+5mh2NvicgWBfVJHHheuck6oHD+HC9bVWPaHvCP0/Aw4pHDejwrvT8hE3+zZAaWf+hrig==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -1008,6 +1014,10 @@ snapshots:
       '@tauri-apps/cli-win32-x64-msvc': 2.8.3
 
   '@tauri-apps/plugin-dialog@2.3.3':
+    dependencies:
+      '@tauri-apps/api': 2.8.0
+
+  '@tauri-apps/plugin-fs@2.4.2':
     dependencies:
       '@tauri-apps/api': 2.8.0
 

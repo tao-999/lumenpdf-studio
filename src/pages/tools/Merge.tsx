@@ -1,25 +1,36 @@
-// src/pages/merge/Merge.tsx
+// src/pages/tools/Merge.tsx
 import { useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import type { Event as TauriEvent } from "@tauri-apps/api/event";
+import { readFile } from "@tauri-apps/plugin-fs";
 
 import styles from "../../css/merge.module.css";
 import { bindUiSink, log, err } from "../../shared/logger";
 import { putBlob, removeBlob, toInvokePayload, type PdfSlot } from "../../shared/pdfStore";
-import { mergePdfs } from "../../shared/api"; // ✅ 统一口令：只用 merge
+import { mergePdfs } from "../../shared/api";
 
-type Path = string;
+const INTERNAL_DND_TYPE = "application/x-lumenpdf-index";
 
 export default function Merge({ back }: { back: () => void }) {
-  const [items, setItems] = useState<PdfSlot[]>([]); // 只存 meta；真正字节在 pdfStore
+  const [items, setItems] = useState<PdfSlot[]>([]);
   const [logUi, setLogUi] = useState("");
-  const [dragOver, setDragOver] = useState(false);
+  const [dragOver, setDragOver] = useState(false);     // 仅用于“外部文件拖入”高亮
   const [nudge, setNudge] = useState<"none" | "invalid">("none");
   const dzRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLOListElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // —— 排序拖拽状态 —— //
+  // —— 排序状态：用 state 触发重渲染 + ref 提供给原生/全局监听 —— //
+  const [isSorting, setIsSorting] = useState(false);
+  const sortingRef = useRef(false);
+  const setSorting = (v: boolean) => {
+    sortingRef.current = v;
+    setIsSorting(v);
+    if (v) { (document.body as any).dataset.sorting = "1"; }
+    else { delete (document.body as any).dataset.sorting; }
+  };
+
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [hoverPos, setHoverPos] = useState<"before" | "after" | null>(null);
@@ -28,19 +39,32 @@ export default function Merge({ back }: { back: () => void }) {
     bindUiSink((line) => setLogUi((l) => (l ? l + "\n" + line : line)));
   }, []);
 
-  // 把 FileList 读成 Uint8Array，递增加入
+  // ========== 文件导入（两路：原生路径 / 浏览器 FileList） ========== //
   async function addFilesFromFileList(list: FileList | null) {
     if (!list || !list.length) return;
     const files = Array.from(list).filter(f => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
     if (!files.length) { err("请选择/拖入 PDF 文件"); return; }
+    await addMany(files.map(f => ({ name: f.name, read: () => f.arrayBuffer().then(b => new Uint8Array(b)) })));
+  }
+
+  async function addFilesFromPaths(paths: string[]) {
+    const pdfs = paths.filter(p => /\.pdf$/i.test(p));
+    if (!pdfs.length) { err("拖入的不是 PDF 文件"); return; }
+    await addMany(pdfs.map(p => ({ name: basename(p), read: () => readFile(p) })));
+  }
+
+  async function addMany(entries: Array<{ name: string; read: () => Promise<Uint8Array> }>) {
     const metas: PdfSlot[] = [];
-    for (const f of files) {
-      const buf = new Uint8Array(await f.arrayBuffer());
-      const slot = putBlob(f.name, buf);
-      metas.push(slot);
+    for (const e of entries) {
+      try {
+        const buf = await e.read();
+        const slot = putBlob(e.name, buf);
+        metas.push(slot);
+      } catch (e) {
+        err("读取文件失败", e);
+      }
     }
     setItems(prev => {
-      // 去重：按 name+size 粗略去重（可换哈希更严）
       const seen = new Set(prev.map(p => p.name + "@" + p.size));
       const next = prev.slice();
       for (const m of metas) {
@@ -49,58 +73,95 @@ export default function Merge({ back }: { back: () => void }) {
       }
       return next;
     });
-    log("add(binary)", metas.map(m => `${m.name} (${m.size}B)`));
+    log("add", metas.map(m => `${m.name} (${m.size}B)`));
   }
 
-  // Tauri v2 文件拖拽事件：用于视觉反馈；真正的“读字节”走 DOM onDrop
+  // ===== Webview 原生拖拽事件：仅处理“外部文件拖入” =====
   useEffect(() => {
     let un: undefined | (() => void);
     (async () => {
       try {
-        un = await getCurrentWebview().onDragDropEvent((event: TauriEvent<DragDropEvent>) => {
+        un = await getCurrentWebview().onDragDropEvent(async (event: TauriEvent<DragDropEvent>) => {
+          // 内部排序：忽略所有 webview 拖拽反馈
+          if (sortingRef.current) return;
+
           const t = event.payload.type;
-          if (t === "enter" || t === "over") setDragOver(true);
-          else if (t === "leave") setDragOver(false);
-          else if (t === "drop") setDragOver(false);
+          if (t === "enter" || t === "over") {
+            setDragOver(true);
+          } else if (t === "leave") {
+            setDragOver(false);
+          } else if (t === "drop") {
+            setDragOver(false);
+            const paths = (event.payload as any).paths as string[] | undefined;
+            if (paths?.length) await addFilesFromPaths(paths);
+          }
         });
       } catch (e) { err("onDragDropEvent 监听失败", e); }
     })();
     return () => { try { un?.(); } catch {} };
   }, []);
 
-  // DOM 真实 onDrop：从 DataTransfer.files 读 File 对象 ⇒ ArrayBuffer
+  // ===== 浏览器 fallback：仅在外部文件拖入时处理 =====
+  function isFileDrag(e: React.DragEvent) {
+    // 内部排序期间，一律当作非文件
+    if (sortingRef.current) return false;
+    const dt = e.dataTransfer;
+    if (!dt) return false;
+    // 更稳的判断：types 或 items 任意一个包含 file 都算外部文件
+    const types = Array.from(dt.types || []);
+    const items = dt.items ? Array.from(dt.items) as DataTransferItem[] : [];
+    const hasFiles = types.includes("Files") || items.some(i => i.kind === "file");
+    return hasFiles;
+  }
   function onDrop(e: React.DragEvent) {
-    e.preventDefault();
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); e.stopPropagation();
     setDragOver(false);
     addFilesFromFileList(e.dataTransfer?.files ?? null);
   }
-  function onDragOver(e: React.DragEvent)  { e.preventDefault(); setDragOver(true); }
-  function onDragLeave(e: React.DragEvent) { e.preventDefault(); setDragOver(false); }
+  function onDragOver(e: React.DragEvent)  {
+    if (!isFileDrag(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    setDragOver(true);
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e: React.DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    setDragOver(false);
+  }
 
   function onPickClick() { inputRef.current?.click(); }
   function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     addFilesFromFileList(e.target.files);
-    // 清空 value 以便连续选择同一文件也能触发 change
     e.currentTarget.value = "";
   }
 
-  // 单项删除
-  function removeOne(id: string) {
-    setItems(prev => prev.filter(x => x.id !== id));
-    // 从 blob 仓库移除
-    try { removeBlob(id); } catch {}
+  // ========= 列表内拖拽排序（整行拖拽 + 容器捕获兜底） ========= //
+  // pointerdown 先标记“内部排序”，避免上传区高亮
+  function onListPointerDownCapture(e: React.PointerEvent<HTMLOListElement>) {
+    const el = (e.target as HTMLElement)?.closest?.("li[data-dnd-item='true']");
+    if (el) setSorting(true);
   }
 
-  // 抖动提醒
-  function pokeDropzone() {
-    try {
-      dzRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      setNudge("invalid");
-      setTimeout(() => setNudge("none"), 420);
-    } catch {}
+  // ⛳ 关键新增：捕获阶段就写入内部 MIME，避免被全局当作外部文件
+  function onListDragStartCapture(e: React.DragEvent<HTMLOListElement>) {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.("li[data-dnd-item='true']")) {
+      try { e.dataTransfer?.setData(INTERNAL_DND_TYPE, "1"); } catch {}
+    }
   }
 
-  // ========= 列表内拖拽排序（HTML5 DnD） ========= //
+  useEffect(() => {
+    const up = () => setSorting(false);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("dragend", up, true);
+    return () => {
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("dragend", up, true);
+    };
+  }, []);
+
   function move<T>(arr: T[], from: number, to: number): T[] {
     const next = arr.slice();
     const [x] = next.splice(from, 1);
@@ -108,61 +169,110 @@ export default function Merge({ back }: { back: () => void }) {
     return next;
   }
 
-  function onItemDragStart(i: number, e: React.DragEvent) {
+  function isInternalDrag(e: React.DragEvent | DragEvent) {
+    const dt = e.dataTransfer;
+    if (!dt) return false;
+    const types = Array.from(dt.types || []);
+    // 先查内部 MIME
+    if (types.includes(INTERNAL_DND_TYPE)) return true;
+    // 兜底：状态位还在，但 MIME 丢了
+    if (sortingRef.current) return true;
+    return false;
+  }
+
+  function calcIndexFromY(clientY: number) {
+    const list = listRef.current;
+    if (!list) return items.length;
+    const rows = Array.from(list.querySelectorAll("li[data-dnd-item='true']")) as HTMLLIElement[];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      const mid = r.top + r.height / 2;
+      if (clientY < mid) return i;
+    }
+    return rows.length;
+  }
+
+  // 容器兜底：只要是内部拖拽就阻止默认，避免🚫
+  function onListDragEnterCapture(e: React.DragEvent<HTMLOListElement>) {
+    if (!isInternalDrag(e)) return;
+    e.preventDefault(); e.stopPropagation();
+  }
+  function onListDragOverCapture(e: React.DragEvent<HTMLOListElement>) {
+    if (!isInternalDrag(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  }
+  function onListDrop(e: React.DragEvent<HTMLOListElement>) {
+    if (!isInternalDrag(e) || dragIdx == null) return;
+    e.preventDefault(); e.stopPropagation();
+    let to = calcIndexFromY(e.clientY);
+    if (dragIdx < to) to -= 1;
+    if (to !== dragIdx) {
+      setItems(prev => {
+        const next = move(prev, dragIdx, Math.max(0, Math.min(prev.length - 1, to)));
+        log("reorder(container)", { from: dragIdx, to, names: next.map(x => x.name) });
+        return next;
+      });
+    }
+    setDragIdx(null); setHoverIdx(null); setHoverPos(null);
+    setSorting(false);
+  }
+
+  function onItemDragStart(i: number, e: React.DragEvent<HTMLLIElement>) {
+    setSorting(true);
     setDragIdx(i);
-    // 仅用于标识内部拖拽，避免被外层 dropzone 误判
-    e.dataTransfer.setData("text/plain", String(i));
+    e.dataTransfer.setData(INTERNAL_DND_TYPE, String(i));
+    e.dataTransfer.setData("text/plain", String(i)); // 兼容
     e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setDragImage(e.currentTarget as Element, 12, 12); } catch {}
+  }
+
+  function onItemDragEnter(i: number, e: React.DragEvent<HTMLLIElement>) {
+    if (!isInternalDrag(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    setHoverIdx(i);
   }
 
   function onItemDragOver(i: number, e: React.DragEvent<HTMLLIElement>) {
-    // 允许放置
-    e.preventDefault();
-    e.stopPropagation();
-    // 计算指示线位置（项的上半/下半）
+    if (!isInternalDrag(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+
     const rect = (e.currentTarget as HTMLLIElement).getBoundingClientRect();
     const y = e.clientY - rect.top;
     const pos: "before" | "after" = y < rect.height / 2 ? "before" : "after";
-    setHoverIdx(i);
-    setHoverPos(pos);
-  }
-
-  function onItemDragLeave(_i: number, _e: React.DragEvent) {
-    // 不立即清空，避免闪烁；在 drop / dragend 时统一清
+    if (hoverIdx !== i || hoverPos !== pos) {
+      setHoverIdx(i);
+      setHoverPos(pos);
+    }
   }
 
   function onItemDrop(i: number, e: React.DragEvent<HTMLLIElement>) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (dragIdx == null) return;
+    if (!isInternalDrag(e) || dragIdx == null) return;
+    e.preventDefault(); e.stopPropagation();
 
-    // 计算最终目标插入位：目标项之前/之后
     const pos = hoverPos ?? "after";
     let to = i + (pos === "after" ? 1 : 0);
-
-    // 如果原位置在目标前且往后插，删除后索引会左移一位，修正一下
     if (dragIdx < to) to -= 1;
 
     if (to !== dragIdx) {
       setItems(prev => {
         const next = move(prev, dragIdx, Math.max(0, Math.min(prev.length - 1, to)));
-        log("reorder", { from: dragIdx, to, names: next.map(x => x.name) });
+        log("reorder(item)", { from: dragIdx, to, names: next.map(x => x.name) });
         return next;
       });
     }
-
-    // 清状态
-    setDragIdx(null);
-    setHoverIdx(null);
-    setHoverPos(null);
+    setDragIdx(null); setHoverIdx(null); setHoverPos(null);
+    setSorting(false);
   }
 
-  function onItemDragEnd() {
-    setDragIdx(null);
-    setHoverIdx(null);
-    setHoverPos(null);
+  function onItemDragEnd(e?: React.DragEvent) {
+    if (e && isInternalDrag(e)) { e.preventDefault(); e.stopPropagation(); }
+    setDragIdx(null); setHoverIdx(null); setHoverPos(null);
+    setSorting(false);
   }
 
+  // ========= 合并 ========= //
   async function doMerge() {
     if (items.length === 0) { err("还没有添加任何 PDF。先拖拽或选择添加。"); pokeDropzone(); return; }
     if (items.length === 1) { err("至少选择两个 PDF 才能合并。"); pokeDropzone(); return; }
@@ -171,18 +281,28 @@ export default function Merge({ back }: { back: () => void }) {
     if (!out) return;
 
     try {
-      // 从内存仓库取出 bytes，构造 IPC 载荷（BytesInput[]）
       const ids = items.map(i => i.id);
       const names = items.map(i => i.name);
-      const payload = toInvokePayload(ids, names); // => [{ name, data:number[] }, ...]
-
+      const payload = toInvokePayload(ids, names);
       log("[merge] start", { count: payload.length, out, order: names });
-      // ✅ 统一调用：merge（后端用 #[serde(untagged)] 自动识别字节/路径）
       const res = await mergePdfs(payload as any, out as string);
       log("✅ 合并完成：", res);
     } catch (e: any) {
       err("❌ 合并失败：", e?.message || e);
     }
+  }
+
+  // —— 其他杂项 —— //
+  function removeOne(id: string) {
+    setItems(prev => prev.filter(x => x.id !== id));
+    try { removeBlob(id); } catch {}
+  }
+  function pokeDropzone() {
+    try {
+      dzRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setNudge("invalid");
+      setTimeout(() => setNudge("none"), 420);
+    } catch {}
   }
 
   return (
@@ -192,6 +312,7 @@ export default function Merge({ back }: { back: () => void }) {
       </div>
       <div className="h1">合并 PDF</div>
 
+      {/* 内部排序时禁用 dropzone 指针事件，避免它抢事件导致🚫和高亮 */}
       <div
         ref={dzRef}
         className={[
@@ -199,6 +320,7 @@ export default function Merge({ back }: { back: () => void }) {
           dragOver ? styles.dragover : "",
           nudge === "invalid" ? styles.invalid : "",
         ].join(" ")}
+        style={{ pointerEvents: isSorting ? ("none" as const) : ("auto" as const) }}
         onClick={onPickClick}
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -229,13 +351,25 @@ export default function Merge({ back }: { back: () => void }) {
         </button>
       </div>
 
-      <ol className={styles.fileList} aria-live="polite">
+      {/* 列表容器：标记内部区域 + 捕获阶段兜底 + pointerdown 预标记 */}
+      <ol
+        ref={listRef}
+        className={styles.fileList}
+        data-dnd-internal="true"
+        aria-live="polite"
+        onPointerDownCapture={onListPointerDownCapture}
+        onDragStartCapture={onListDragStartCapture}
+        onDragEnterCapture={onListDragEnterCapture}
+        onDragOverCapture={onListDragOverCapture}
+        onDrop={onListDrop}
+      >
         {items.length === 0 ? (
           <li className={styles.fileEmpty}>未选择文件…</li>
         ) : (
           items.map((it, i) => (
             <li
               key={it.id}
+              data-dnd-item="true"
               className={[
                 styles.fileItem,
                 (dragIdx === i) ? styles.dragging : "",
@@ -245,14 +379,13 @@ export default function Merge({ back }: { back: () => void }) {
               title={`${it.name} (${it.size} bytes)`}
               draggable
               onDragStart={(e) => onItemDragStart(i, e)}
+              onDragEnter={(e) => onItemDragEnter(i, e)}
               onDragOver={(e) => onItemDragOver(i, e)}
-              onDragLeave={(e) => onItemDragLeave(i, e)}
               onDrop={(e) => onItemDrop(i, e)}
               onDragEnd={onItemDragEnd}
             >
               <span className={styles.index} aria-hidden>{i + 1}</span>
               <span className={styles.fileName}>{it.name}</span>
-              <span className={styles.grip} title="拖拽以重新排序" aria-label="拖拽以重新排序">⋮⋮</span>
               <button
                 className={styles.removeBtn}
                 onClick={(e) => { e.stopPropagation(); removeOne(it.id); }}
@@ -272,6 +405,9 @@ export default function Merge({ back }: { back: () => void }) {
   );
 }
 
+function basename(p: string) {
+  return p.replace(/\\+/g, "/").split("/").pop() || "unnamed.pdf";
+}
 function UploadIcon() {
   return (
     <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden style={{ opacity: 0.9 }}>

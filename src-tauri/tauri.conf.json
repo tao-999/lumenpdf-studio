@@ -16,14 +16,15 @@
         "width": 1280,
         "height": 800,
         "resizable": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": true
       }
     ]
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/qpdf"],
-    "resources": ["binaries/*"]
+    "resources": [
+      "binaries/**/*"
+    ]
   }
 }

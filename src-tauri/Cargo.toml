@@ -1,3 +1,4 @@
+# src-tauri/Cargo.toml
 [package]
 name = "lumenpdf-core"
 version = "0.1.0"
@@ -5,10 +6,9 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-# 用主版本即可，避免被具体小版本坑住
 tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"          # ✅ 必加：前端 readBinaryFile 依赖它
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

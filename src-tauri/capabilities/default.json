@@ -11,15 +11,13 @@
     "core:path:default",
     "core:resources:default",
     "core:webview:default",
-
     "dialog:default",
 
-    "shell:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        { "name": "binaries/qpdf", "sidecar": true }
-      ]
-    }
+    "fs:default",
+    "fs:allow-exists",
+    "fs:allow-read",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:read-all"
   ]
 }

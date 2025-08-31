@@ -114,3 +114,19 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 .grip:active { cursor: grabbing; }
+.fileItem {
+  user-select: none;   /* 防止拖到文字 */
+}
+.grip {
+  cursor: grab;
+  margin-left: auto;
+}
+.fileItem.dragging .grip {
+  cursor: grabbing;
+}
+.fileItem.dropBefore { box-shadow: inset 0 2px 0 0 currentColor; }
+.fileItem.dropAfter  { box-shadow: inset 0 -2px 0 0 currentColor; }
+/* src/css/merge.module.css 的基础手势，已有就忽略 */
+.fileList { -webkit-user-select: none; user-select: none; }
+.fileItem { cursor: grab; }
+.fileItem:active { cursor: grabbing; }
