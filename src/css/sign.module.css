@@ -1,0 +1,163 @@
+/* ================== 布局变量 ================== */
+.edgeLayout {
+  --side: 300px;
+  --side-collapsed: 48px;
+  --leftW: var(--side);
+  --rightW: var(--side);
+  --gap: 16px;
+  --topbar: 56px;
+  color: inherit;
+}
+
+/* ================== 顶部条：固定 ================== */
+.edgeTopbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--topbar);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--gap);
+  background: transparent;
+  z-index: 40;
+}
+.back { cursor: pointer; opacity: .9; }
+.title { font-size: 18px; font-weight: 600; opacity: .95; }
+
+/* ================== 左侧：固定贴屏 ================== */
+.edgeLeft {
+  position: fixed;
+  top: var(--topbar); bottom: 0; left: 0;
+  width: var(--leftW);
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 12px;
+  background: transparent;
+  z-index: 30;
+  overflow: auto;
+}
+.edgeLeft.collapsed { width: var(--side-collapsed); }
+.edgeLeft.collapsed > :not(.collapseBtn) { display: none; }
+
+/* ================== 右侧：固定贴屏 ================== */
+.edgeRight {
+  position: fixed;
+  top: var(--topbar); bottom: 0; right: 0;
+  width: var(--rightW);
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 12px;
+  background: transparent;
+  z-index: 30;
+  overflow: auto;
+}
+.edgeRight.collapsed { width: var(--side-collapsed); }
+.edgeRight.collapsed > :not(.collapseBtn) { display: none; }
+
+/* ================== 中间舞台 ==================
+   ❗不设固定 height，改用 min-height，避免把日志顶到背后重叠
+================================================ */
+.edgeCenter {
+  position: relative;
+  margin-top: var(--topbar);
+  margin-left: calc(var(--leftW) + var(--gap));
+  margin-right: calc(var(--rightW) + var(--gap));
+  padding: var(--gap);
+  display: flex; align-items: flex-start; justify-content: center;
+  min-height: calc(100vh - var(--topbar) - var(--gap) * 2);
+  overflow: visible; /* 让舞台自由延展，滚动交给 body */
+}
+
+/* ================== 日志：紧跟在 PDF 之后 ================== */
+.logWrap {
+  margin-left: calc(var(--leftW) + var(--gap));
+  margin-right: calc(var(--rightW) + var(--gap));
+  margin-top: 12px;
+  margin-bottom: 24px;
+}
+.log {
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow: auto;
+  background: rgba(0,0,0,.3);
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.08);
+}
+
+/* ================== 上传区与面板 ================== */
+.dropzone {
+  border: 1px dashed rgba(255,255,255,.2);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  background: rgba(255,255,255,.03);
+  cursor: pointer; user-select: none;
+}
+.dragover { background: rgba(77,163,255,.15); border-color: #4da3ff; }
+.dzTitle { font-weight: 600; margin-bottom: 4px; }
+.dzSub { opacity: .7; font-size: 12px; }
+
+.fileName {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: .9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(255,255,255,.03);
+}
+
+.panel {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.kv { display: flex; justify-content: space-between; font-size: 13px; opacity: .9; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 折叠按钮 */
+.collapseBtn {
+  align-self: flex-end;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.05);
+  color: inherit;
+  border-radius: 6px; font-size: 12px; line-height: 1;
+  padding: 6px 8px; cursor: pointer;
+}
+
+/* 签名缩略图 */
+.thumbBox {
+  border: 1px dashed rgba(255,255,255,.12);
+  border-radius: 6px;
+  background: #0f0f0f;
+  min-height: 72px;
+  display: flex; align-items: center; justify-content: center;
+}
+.placeholder { opacity: .5; font-size: 12px; padding: 8px 0; }
+.stampThumb {
+  height: 64px; border-radius: 4px;
+  border: 1px solid rgba(255,255,255,.12);
+  padding: 4px; background: #fff; cursor: grab;
+}
+
+/* 幽灵预览 */
+.ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: .85;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));
+}
+
+/* ================== 响应式（小屏收起左右栏） ================== */
+@media (max-width: 1100px) {
+  .edgeLeft, .edgeRight { position: static; width: auto; height: auto; }
+  .edgeCenter {
+    margin: calc(var(--gap) + var(--topbar)) var(--gap) var(--gap);
+    padding: var(--gap);
+    min-height: auto;
+  }
+  .logWrap { margin: 12px var(--gap) 24px; }
+}

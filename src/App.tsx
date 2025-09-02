@@ -6,6 +6,7 @@ import Home from "./pages/Home";
 import Merge from "./pages/tools/Merge";
 import Compress from "./pages/tools/Compress";
 import Placeholder from "./pages/tools/Placeholder";
+import Sign from "./pages/tools/Sign";
 
 // 兜底
 import ErrorBoundary from "./shared/ErrorBoundary";
@@ -42,42 +43,10 @@ export default function App() {
     window.addEventListener("error", onErr);
     window.addEventListener("unhandledrejection", onRej);
 
-    // ✅ 仅在外部“文件”拖入时拦截 dragover；内部 DnD 一律放行；不拦 drop
-    const INTERNAL_DND_TYPE = "application/x-lumenpdf-index";
-    const allowFilesOnly = (e: DragEvent) => {
-      // 已被更内层处理过：放行
-      if ((e as any).defaultPrevented) return;
+    // 🧹 去掉全局 dragover 限制，避免干扰业务内的拖拽（签名拖入 PDF 等）
+    // 统一由各业务组件（如 Sign 的 dropzone / PdfStage）自行处理 dragenter/over/drop
 
-      // 正在内部排序：放行
-      if ((document.body as any).dataset?.sorting === "1") return;
-
-      // 在内部排序区域：放行
-      const path = (e.composedPath?.() || []) as Element[];
-      const isInternalArea = path.some((el) => (el as HTMLElement)?.dataset?.dndInternal === "true");
-      if (isInternalArea) return;
-
-      const dt = e.dataTransfer;
-      if (!dt) return;
-
-      const types = Array.from(dt.types || []);
-      const items = dt.items ? Array.from(dt.items) as DataTransferItem[] : [];
-
-      // ⛳ 内部拖拽“通行证”：命中直接放行
-      if (types.includes(INTERNAL_DND_TYPE)) return;
-
-      // 更稳：优先 items 判断是否为文件
-      const hasFiles = items.some(i => i.kind === "file") || types.includes("Files");
-      if (!hasFiles) return;
-
-      // 仅在 dragover 上允许外部文件投递（真正的 drop 交给目标元素处理）
-      e.preventDefault();
-      dt.dropEffect = "copy";
-    };
-
-    window.addEventListener("dragover", allowFilesOnly, { capture: true });
-    // ❌ 不要拦 window 的 drop，否则子元素拿不到 files
-
-    // 探针
+    // 探针（可留）
     (async () => {
       try {
         const isTauri = typeof window !== "undefined" && "__TAURI__" in window;
@@ -93,7 +62,7 @@ export default function App() {
     return () => {
       window.removeEventListener("error", onErr);
       window.removeEventListener("unhandledrejection", onRej);
-      window.removeEventListener("dragover", allowFilesOnly, { capture: true } as any);
+      // ❌ 不再移除 dragover，因为我们没有在 window 上注册它了
     };
   }, []);
 
@@ -116,19 +85,7 @@ export default function App() {
       case "watermark":
       case "rotate":
       case "sign":
-        return (
-          <div style={{ padding: 16 }}>
-            <div className="h1">功能建设中</div>
-            <p style={{ opacity: 0.8, marginTop: 8 }}>
-              路由：<code>{JSON.stringify(route)}</code>
-            </p>
-            <div style={{ marginTop: 12 }}>
-              <button className="btn" onClick={() => setRoute({ name: "home" })}>
-                ← 返回首页
-              </button>
-            </div>
-          </div>
-        );
+        return <Sign back={() => setRoute({ name: "home" })} />;
       default:
         return (
           <div style={{ padding: 16 }}>
