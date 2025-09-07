@@ -3,6 +3,7 @@
 > 一个跨平台的桌面 PDF 工具，采用 **Tauri + React + TypeScript + Vite** 构建，轻巧如风，强大如光。
 
 ---
+![微信图片_20250901191704_1_39](https://github.com/user-attachments/assets/640f82e4-f3f1-41c9-ba54-ff33db4cf67a)
 
 ##  技术栈
 - 框架：React + TypeScript，结合 Vite 构建
